@@ -3,5 +3,4 @@ dash_bootstrap_components
 dash_player
 pandas
 plotly
-os
 gunicorn
