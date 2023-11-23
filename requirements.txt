@@ -1,4 +1,7 @@
 dash==2.6.0
+dash_bootstrap_components
+dash_player
 pandas
 plotly
+os
 gunicorn
