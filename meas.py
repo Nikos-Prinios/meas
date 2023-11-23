@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import dash_player as dp
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
+server= app.server
 
 dir_path = r"C:\Users\colonel\Desktop\meas\human"
 directory_names = [name for name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, name))]
