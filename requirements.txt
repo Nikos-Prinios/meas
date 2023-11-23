@@ -4,5 +4,5 @@ dash_player
 pandas
 plotly
 tensorflow
-sklearn
+scikit-learn
 gunicorn
