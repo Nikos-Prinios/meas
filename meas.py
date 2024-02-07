@@ -5,14 +5,12 @@ import dash_bootstrap_components as dbc
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from dash.dependencies import ALL
-from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 import dash_player as dp
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
-server= app.server
 
-dir_path = "human"
+dir_path = r"C:\Users\colonel\Desktop\meas\human"
 directory_names = [name for name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, name))]
 
 dropdown_items = []
@@ -30,6 +28,12 @@ dropdown = dbc.DropdownMenu(
     children=dropdown_items,
     style={"margin-top": "-38px"}
 )
+
+def format_time(seconds):
+    """Convertit les secondes en format minutes:secondes"""
+    minutes = int(seconds // 60)
+    remaining_seconds = int(seconds % 60)
+    return f"{minutes:02}:{remaining_seconds:02}"
 
 def split_dataframe(df, ranges_str):
     ranges = ranges_str.split(',')
@@ -119,7 +123,7 @@ app.layout = html.Div([
                         ),
                     ], style={'margin-top': '-26px',  'margin-left': '1090px',  'position':'absolute', 'z-index': '1900'}), width=2)  # adjust width as necessary
                 ]),
-
+                dcc.Store(id='video-time'),
                 dcc.Store(id='selected-value', data=None),
                 dcc.Store(id='toggle-value', data=False),  # Store for the toggle status
             ], width=12, style={"background-color": "#333", "padding": "5px 0", "height": "80px"}),
@@ -200,9 +204,8 @@ app.layout = html.Div([
                                 style={'width': '100%', 'height': 'auto', 'overflow': 'auto', 'margin-top': '0px'}
                             ),
                             html.Div([
-                                dbc.Button(" Modalities ", color='warning', id="modalities-button", size="sm",  className="me-3", style={"margin-right": "10px"}),
-                                dbc.Button("  Time  ",  color='warning', id="time-button", size="sm",  className="me-3", style={"margin-right": "10px"}),
                                 dbc.Button("  Save Notes  ",  color='success', id="save-note",  className="me-3"),
+                                html.Div(id='note-save-status')
                             ], style={'justify-content': 'right', 'margin-top': '10px'}),
 
                             # CNN
@@ -288,6 +291,41 @@ def clear_output(n_clicks_clear, selected_person):
     else:
         raise PreventUpdate
 
+
+from dash.exceptions import PreventUpdate
+
+
+@app.callback(
+    [Output('note-save-status', 'children'),  # Pour afficher le statut de sauvegarde des notes
+     Output('textarea', 'value')],  # Pour réinitialiser le contenu du textarea
+    [Input('save-note', 'n_clicks')],  # Bouton pour déclencher la sauvegarde des notes
+    [State('textarea', 'value'),  # Contenu du textarea
+     State('selected-value', 'data'),  # Personne sélectionnée
+     State({'type': 'dynamic-checklist', 'index': ALL}, 'value'),  # Valeurs des checkboxes
+     State('video-time', 'data')]  # Temps vidéo stocké
+)
+def save_notes(n_clicks, text, selected_person, checkbox_values, video_time):
+    if n_clicks is None or n_clicks < 1 or not text or not selected_person:
+        raise PreventUpdate  # Ne pas mettre à jour si les conditions ne sont pas remplies
+
+    # Traitement des valeurs des checkboxes pour obtenir les checkboxes sélectionnées
+    checked_checkboxes = [val[0].split(":") for val in checkbox_values if val]
+    checked_items = ', '.join([f"{item[0]}: {item[1]}" for item in checked_checkboxes])
+
+    separator = "\n" + "-" * 50 + "\n"
+
+    try:
+        notes_file_path = os.path.join(dir_path, selected_person, 'notes.txt')
+        with open(notes_file_path, 'a') as file:
+            file.write(f"Texte: {text}\n")
+            if video_time is not None:
+                formatted_time = format_time(float(video_time))
+                file.write(f"Temps vidéo: {formatted_time}\n")
+            file.write(f"Checkboxes sélectionnées: {checked_items}\n")
+            file.write(separator)
+        return [f"Notes enregistrées avec succès !", '']
+    except Exception as e:
+        return [f"Une erreur s'est produite : {e}", text]  # Message d'erreur tout en maintenant le texte en cas d'erreur
 
 
 @app.callback(
@@ -407,16 +445,18 @@ def show_hide_button(data):
 @app.callback(
     [
         Output('video-player-small', 'seekTo'),
-        Output('video-player-large', 'seekTo')
+        Output('video-player-large', 'seekTo'),
+        Output('video-time', 'data')  # Ajouter le stockage du temps vidéo comme sortie
     ],
     [Input('line-graph', 'clickData')],
 )
 def update_video_frame(clickData):
     if clickData is not None:
-        new_time = clickData['points'][0]['x']  # Assuming 'x' is time in seconds
-        return new_time, new_time
+        new_time = clickData['points'][0]['x']
+        return new_time, new_time, new_time  # Mettre à jour le stockage avec le nouveau temps
     else:
-        return dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update
+
 
 
 
@@ -463,57 +503,6 @@ def toggle_column(n):
     else:
         return dict(display='none', width='0%'), dict(display='block', width='100%')
 
-# ------ CNN -----------------------------------------------------------------------------
-# ----------------------------------------------------------------------------------------
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense
-from tensorflow.keras.optimizers import Adam
-from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.utils import to_categorical
-
-def train_cnn(df, person_name, label):
-    data = df.values.reshape((df.shape[0], df.shape[1], 1))
-    model = Sequential()
-    model.add(Conv1D(32, 3, activation='relu', input_shape=data.shape[1:]))
-    model.add(MaxPooling1D(2))
-    model.add(Conv1D(64, 3, activation='relu'))
-    model.add(MaxPooling1D(2))
-    model.add(Flatten())
-    model.add(Dense(64, activation='relu'))
-    model.add(Dense(1, activation='sigmoid'))
-
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-
-    encoder = LabelEncoder()
-    y = encoder.fit_transform([label]*df.shape[0])
-    y = to_categorical(y)
-
-    model.fit(data, y, epochs=10, batch_size=32)
-
-    # Sauvegarder le modèle
-    model.save(f'{dir_path}/{person_name}/data/model.h5')
-
-    return model
-
-
-@app.callback(
-    Output('model-output', 'children'),
-    Input('save-button', 'n_clicks'),
-    State('ranges-input', 'value'),
-    State('data-table', 'data'),
-    State('selected-value', 'data'),
-    prevent_initial_call=True
-)
-def train_model(n_clicks, ranges_str, data, selected_person):
-    if n_clicks is None:
-        raise PreventUpdate
-
-    df = pd.DataFrame(data)
-    dataframes = split_dataframe(df, ranges_str)
-
-    for df in dataframes:
-        model = train_cnn(df, selected_person)
-    return "Model trained successfully!"
 
 
 if __name__ == '__main__':
